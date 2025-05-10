@@ -14,7 +14,8 @@ logger = setup_logging()
 logger.info("Application starting")
 
 # Import configuration
-from config import APP_TITLE, UPLOAD_DIR, OUTPUT_FILE
+from config import APP_TITLE, UPLOAD_DIR, OUTPUT_FILE, DEFAULT_REGISTRY_PATH
+
 logger.info("Configuration loaded")
 
 # Import the application modules
@@ -39,6 +40,7 @@ class TarkastusApp:
         self.registry_file = None
         self.uploaded_files = []
         self.processing_results = []
+        self.registry_upload_container = None
 
         # Create the application UI structure
         try:
@@ -59,8 +61,37 @@ class TarkastusApp:
             # Registry file upload section
             logger.debug("Creating registry file upload section")
             create_section_title('Lataa Asiakasrekisteri tiedosto')
-            self.registry_upload = FileUploadComponent('Asiakasrekisteri ja laitetiedot Excel-tiedosto')
-            self.registry_upload.on_upload(self._handle_registry_upload)
+
+            # Container for registry selection UI
+            with ui.column().classes('w-full') as registry_section:
+                # Add a note about the default registry file
+                if os.path.exists(DEFAULT_REGISTRY_PATH):
+                    # Status display for the selected registry
+                    self.registry_status = ui.label('')
+
+                    # Row for buttons
+                    with ui.row().classes('w-full items-center justify-between'):
+                        # Button to use the default file
+                        use_default_btn = ui.button('Käytä oletustiedostoa', icon='file_open').props('color=primary')
+                        use_default_btn.on_click(self._use_default_registry)
+
+                        # Button to use custom file instead
+                        self.custom_file_btn = ui.button('Käytä mukautettua tiedostoa', icon='upload_file').props(
+                            'outline')
+                        self.custom_file_btn.on_click(self._show_custom_registry_upload)
+
+                # Container for the registry upload component (can be hidden/shown)
+                self.registry_upload_container = ui.column().classes('w-full mt-2')
+                with self.registry_upload_container:
+                    self.registry_upload = FileUploadComponent('Asiakasrekisteri ja laitetiedot Excel-tiedosto')
+                    self.registry_upload.on_upload(self._handle_registry_upload)
+
+                # Initially hide the upload if default exists
+                if os.path.exists(DEFAULT_REGISTRY_PATH):
+                    self.registry_upload_container.set_visibility(False)
+
+                    # Automatically use the default registry
+                    self._use_default_registry()
 
             ui.separator()
 
@@ -91,30 +122,70 @@ class TarkastusApp:
             logger.debug("Creating results container")
             self.results_container = ResultsTableComponent()
 
-    def _handle_registry_upload(self, e):
+    def _use_default_registry(self):
+        """Use the default registry file."""
+        logger.info(f"Using default registry file: {DEFAULT_REGISTRY_PATH}")
+        if os.path.exists(DEFAULT_REGISTRY_PATH):
+            self.registry_file = DEFAULT_REGISTRY_PATH
+            self.registry_status.set_text(f'Käytetään oletustiedostoa: {os.path.basename(DEFAULT_REGISTRY_PATH)}')
+            self.registry_status.classes('text-green-600')
+
+            # Hide the upload component
+            if self.registry_upload_container:
+                self.registry_upload_container.set_visibility(False)
+
+            ui.notify(f'Oletustiedosto valittu: {os.path.basename(DEFAULT_REGISTRY_PATH)}', type='positive')
+        else:
+            self.registry_status.set_text(f'Oletustiedostoa ei löydy: {os.path.basename(DEFAULT_REGISTRY_PATH)}')
+            self.registry_status.classes('text-red-600')
+
+            # Show the upload component as fallback
+            if self.registry_upload_container:
+                self.registry_upload_container.set_visibility(True)
+
+            ui.notify(f'Oletustiedostoa ei löydy: {DEFAULT_REGISTRY_PATH}', type='negative')
+            logger.warning(f"Default registry file not found: {DEFAULT_REGISTRY_PATH}")
+
+    def _show_custom_registry_upload(self):
+        """Show the custom registry upload component."""
+        logger.debug("Showing custom registry upload")
+        if self.registry_upload_container:
+            self.registry_upload_container.set_visibility(True)
+
+        # Clear the registry file selection
+        self.registry_file = None
+        self.registry_status.set_text('Valitse mukautettu tiedosto')
+        self.registry_status.classes('text-gray-600')
+
+    def _handle_registry_upload(self, elem):
         """Handle registry file upload events."""
-        logger.info(f"Registry file upload event received: {e.name}")
+        logger.info(f"Registry file upload event received: {elem.name}")
         try:
-            file_path = save_uploaded_file(UPLOAD_DIR, e.name, e.content)
+            file_path = save_uploaded_file(UPLOAD_DIR, elem.name, elem.content)
             logger.debug(f"Registry file saved to: {file_path}")
             self.registry_file = file_path
-            ui.notify(f'Asiakasrekisteri tiedosto ladattu: {e.name}', type='positive')
-            logger.info(f"Registry file upload successful: {e.name}")
+
+            # Update status
+            self.registry_status.set_text(f'Valittu tiedosto: {elem.name}')
+            self.registry_status.classes('text-green-600')
+
+            ui.notify(f'Asiakasrekisteri tiedosto ladattu: {elem.name}', type='positive')
+            logger.info(f"Registry file upload successful: {elem.name}")
         except Exception as ex:
             error_msg = f"Error uploading registry file: {ex}"
             logger.error(error_msg, exc_info=True)
             ui.notify(error_msg, type='negative')
 
-    def _handle_inspection_upload(self, e):
+    def _handle_inspection_upload(self, elem):
         """Handle inspection file upload events."""
-        logger.info(f"Inspection file upload event received: {e.name}")
+        logger.info(f"Inspection file upload event received: {elem.name}")
         try:
-            file_path = save_uploaded_file(UPLOAD_DIR, e.name, e.content)
+            file_path = save_uploaded_file(UPLOAD_DIR, elem.name, elem.content)
             logger.debug(f"Inspection file saved to: {file_path}")
             self.uploaded_files.append(file_path)
             self.file_list.add_file(file_path)
-            ui.notify(f'Tarkastuspöytäkirja tiedosto ladattu: {e.name}', type='positive')
-            logger.info(f"Inspection file upload successful: {e.name}")
+            ui.notify(f'Tarkastuspöytäkirja tiedosto ladattu: {elem.name}', type='positive')
+            logger.info(f"Inspection file upload successful: {elem.name}")
         except Exception as ex:
             error_msg = f"Error uploading inspection file: {ex}"
             logger.error(error_msg, exc_info=True)
